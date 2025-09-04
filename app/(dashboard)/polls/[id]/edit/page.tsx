@@ -1,10 +1,10 @@
-import { getPollById } from '@/app/lib/actions/poll-actions';
+import { getPollByIdForEdit } from '@/app/lib/actions/poll-actions';
 import { notFound } from 'next/navigation';
 // Import the client component
 import EditPollForm from './EditPollForm';
 
 export default async function EditPollPage({ params }: { params: { id: string } }) {
-  const { poll, error } = await getPollById(params.id);
+  const { poll, error } = await getPollByIdForEdit(params.id);
 
   if (error || !poll) {
     notFound();

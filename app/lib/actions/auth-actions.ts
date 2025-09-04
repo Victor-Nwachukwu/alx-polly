@@ -2,42 +2,78 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { LoginFormData, RegisterFormData } from '../types';
+import { validateLoginData, validateRegisterData, checkRateLimit } from '@/lib/security/validation';
 
 export async function login(data: LoginFormData) {
-  const supabase = await createClient();
+  try {
+    // Rate limiting
+    const rateLimit = checkRateLimit(`login_${data.email}`, 5, 300000); // 5 attempts per 5 minutes
+    
+    if (!rateLimit.allowed) {
+      return { 
+        error: `Too many login attempts. Please wait ${Math.ceil((rateLimit.resetTime - Date.now()) / 1000)} seconds before trying again.` 
+      };
+    }
 
-  const { error } = await supabase.auth.signInWithPassword({
-    email: data.email,
-    password: data.password,
-  });
+    // Validate input
+    const validatedData = validateLoginData(data);
+    
+    const supabase = await createClient();
 
-  if (error) {
-    return { error: error.message };
+    const { error } = await supabase.auth.signInWithPassword({
+      email: validatedData.email,
+      password: validatedData.password,
+    });
+
+    if (error) {
+      return { error: error.message };
+    }
+
+    return { error: null };
+  } catch (error) {
+    return { 
+      error: error instanceof Error ? error.message : "An unexpected error occurred" 
+    };
   }
-
-  // Success: no error
-  return { error: null };
 }
 
 export async function register(data: RegisterFormData) {
-  const supabase = await createClient();
+  try {
+    // Rate limiting
+    const rateLimit = checkRateLimit(`register_${data.email}`, 3, 300000); // 3 registrations per 5 minutes
+    
+    if (!rateLimit.allowed) {
+      return { 
+        error: `Too many registration attempts. Please wait ${Math.ceil((rateLimit.resetTime - Date.now()) / 1000)} seconds before trying again.` 
+      };
+    }
 
-  const { error } = await supabase.auth.signUp({
-    email: data.email,
-    password: data.password,
-    options: {
-      data: {
-        name: data.name,
+    // Validate input
+    const validatedData = validateRegisterData(data);
+    
+    const supabase = await createClient();
+
+    const { error } = await supabase.auth.signUp({
+      email: validatedData.email,
+      password: validatedData.password,
+      options: {
+        data: {
+          name: validatedData.name,
+          role: 'user', // Default role
+        },
       },
-    },
-  });
+    });
 
-  if (error) {
-    return { error: error.message };
+    if (error) {
+      return { error: error.message };
+    }
+
+    return { error: null };
+  } catch (error) {
+    return { 
+      error: error instanceof Error ? error.message : "An unexpected error occurred" 
+    };
   }
-
-  // Success: no error
-  return { error: null };
 }
 
 export async function logout() {

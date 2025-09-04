@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { createPoll } from "@/app/lib/actions/poll-actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,6 +10,21 @@ export default function PollCreateForm() {
   const [options, setOptions] = useState(["", ""]);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+  const [csrfToken, setCsrfToken] = useState<string>("");
+
+  useEffect(() => {
+    // Generate CSRF token on client side
+    const generateToken = async () => {
+      try {
+        const response = await fetch('/api/csrf-token');
+        const data = await response.json();
+        setCsrfToken(data.token);
+      } catch (err) {
+        console.error('Failed to get CSRF token:', err);
+      }
+    };
+    generateToken();
+  }, []);
 
   const handleOptionChange = (idx: number, value: string) => {
     setOptions((opts) => opts.map((opt, i) => (i === idx ? value : opt)));
@@ -27,6 +42,10 @@ export default function PollCreateForm() {
       action={async (formData) => {
         setError(null);
         setSuccess(false);
+        
+        // Add CSRF token
+        formData.set('csrf-token', csrfToken);
+        
         const res = await createPoll(formData);
         if (res?.error) {
           setError(res.error);
@@ -39,10 +58,20 @@ export default function PollCreateForm() {
       }}
       className="space-y-6 max-w-md mx-auto"
     >
+      <input type="hidden" name="csrf-token" value={csrfToken} />
+      
       <div>
         <Label htmlFor="question">Poll Question</Label>
-        <Input name="question" id="question" required />
+        <Input 
+          name="question" 
+          id="question" 
+          required 
+          maxLength={500}
+          placeholder="Enter your poll question..."
+        />
+        <p className="text-sm text-gray-500 mt-1">Maximum 500 characters</p>
       </div>
+      
       <div>
         <Label>Options</Label>
         {options.map((opt, idx) => (
@@ -52,6 +81,8 @@ export default function PollCreateForm() {
               value={opt}
               onChange={(e) => handleOptionChange(idx, e.target.value)}
               required
+              maxLength={200}
+              placeholder={`Option ${idx + 1}`}
             />
             {options.length > 2 && (
               <Button type="button" variant="destructive" onClick={() => removeOption(idx)}>
@@ -60,13 +91,16 @@ export default function PollCreateForm() {
             )}
           </div>
         ))}
-        <Button type="button" onClick={addOption} variant="secondary">
-          Add Option
+        <p className="text-sm text-gray-500 mb-2">Maximum 200 characters per option</p>
+        <Button type="button" onClick={addOption} variant="secondary" disabled={options.length >= 10}>
+          Add Option ({options.length}/10)
         </Button>
       </div>
+      
       {error && <div className="text-red-500">{error}</div>}
       {success && <div className="text-green-600">Poll created! Redirecting...</div>}
-      <Button type="submit">Create Poll</Button>
+      
+      <Button type="submit" disabled={!csrfToken}>Create Poll</Button>
     </form>
   );
 } 
