@@ -1,6 +1,17 @@
 import { z } from 'zod';
 
-// Validation schemas
+/**
+ * Zod schema for validating poll questions
+ * 
+ * WHAT: Defines validation rules for poll questions including length limits and XSS protection.
+ * 
+ * WHY: Poll questions are user-facing content that needs protection against abuse and attacks.
+ * Length limits prevent database bloat and UI breaking. XSS protection prevents malicious
+ * scripts from executing when questions are displayed to other users. The character limit
+ * also ensures questions remain readable and focused, improving user experience.
+ * 
+ * @constant {z.ZodString} PollQuestionSchema
+ */
 export const PollQuestionSchema = z.string()
   .min(1, 'Question is required')
   .max(500, 'Question must be less than 500 characters')
@@ -9,6 +20,16 @@ export const PollQuestionSchema = z.string()
     'Question contains potentially malicious content'
   );
 
+/**
+ * Zod schema for validating poll options
+ * 
+ * Validation rules:
+ * - Required field (minimum 1 character)
+ * - Maximum 200 characters per option
+ * - XSS protection: blocks script tags, javascript: protocol, and event handlers
+ * 
+ * @constant {z.ZodString} PollOptionSchema
+ */
 export const PollOptionSchema = z.string()
   .min(1, 'Option cannot be empty')
   .max(200, 'Option must be less than 200 characters')
@@ -87,9 +108,41 @@ export function sanitizePollData(data: {
   };
 }
 
-// Rate limiting
+/**
+ * In-memory rate limiting storage
+ * Maps identifiers to their request counts and reset times
+ * 
+ * Note: In production, consider using Redis or a database for distributed rate limiting
+ */
 const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
 
+/**
+ * Implements rate limiting to prevent abuse and DoS attacks
+ * 
+ * WHAT: Tracks requests per identifier within a time window and blocks requests that exceed
+ * the maximum allowed limit. Uses an in-memory Map for fast lookups and automatic cleanup.
+ * 
+ * WHY: Rate limiting is essential for protecting against abuse, spam, and DoS attacks.
+ * Without rate limiting, malicious users could overwhelm the system with requests,
+ * causing service degradation or complete unavailability. The sliding window approach
+ * provides fair usage while preventing bursts of malicious activity. In-memory storage
+ * ensures fast response times, though production systems should consider Redis for
+ * distributed rate limiting across multiple server instances.
+ * 
+ * @function checkRateLimit
+ * @param {string} identifier - Unique identifier for rate limiting (e.g., IP address, user ID)
+ * @param {number} maxRequests - Maximum number of requests allowed in the time window
+ * @param {number} windowMs - Time window in milliseconds
+ * @returns {{allowed: boolean, remaining: number, resetTime: number}} Rate limit status
+ * 
+ * @example
+ * ```typescript
+ * const rateLimit = checkRateLimit('user-123', 5, 60000); // 5 requests per minute
+ * if (!rateLimit.allowed) {
+ *   console.log(`Rate limit exceeded. Try again in ${rateLimit.resetTime}ms`);
+ * }
+ * ```
+ */
 export function checkRateLimit(
   identifier: string,
   maxRequests: number,
@@ -99,8 +152,8 @@ export function checkRateLimit(
   const key = identifier;
   const current = rateLimitMap.get(key);
   
+  // If no existing entry or window has expired, create/reset entry
   if (!current || now > current.resetTime) {
-    // Reset or create new entry
     rateLimitMap.set(key, {
       count: 1,
       resetTime: now + windowMs,
@@ -113,6 +166,7 @@ export function checkRateLimit(
     };
   }
   
+  // Check if rate limit exceeded
   if (current.count >= maxRequests) {
     return {
       allowed: false,
@@ -121,6 +175,7 @@ export function checkRateLimit(
     };
   }
   
+  // Increment counter and allow request
   current.count++;
   return {
     allowed: true,

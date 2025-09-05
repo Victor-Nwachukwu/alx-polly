@@ -6,16 +6,48 @@ import { requireAuth } from "@/lib/security/auth-utils";
 import { validatePollData, sanitizePollData, checkRateLimit } from "@/lib/security/validation";
 import { validateCSRFToken } from "@/lib/security/csrf";
 
-// CREATE POLL
+/**
+ * Creates a new poll with comprehensive security validation
+ * 
+ * WHAT: Handles poll creation with multiple security layers including CSRF protection,
+ * rate limiting, authentication verification, input validation, and XSS prevention.
+ * 
+ * WHY: Poll creation is a critical operation that needs protection against various attacks.
+ * CSRF tokens prevent malicious sites from creating polls on behalf of users.
+ * Rate limiting prevents abuse and DoS attacks by limiting poll creation frequency.
+ * Input validation ensures data integrity and prevents injection attacks.
+ * XSS prevention protects against malicious content that could harm other users.
+ * Authentication ensures only logged-in users can create polls, maintaining accountability.
+ * 
+ * @async
+ * @function createPoll
+ * @param {FormData} formData - Form data containing poll question and options
+ * @returns {Promise<{error: string | null, data?: any}>} Result object with error status and optional poll data
+ * 
+ * @example
+ * ```typescript
+ * const formData = new FormData();
+ * formData.append('question', 'What is your favorite color?');
+ * formData.append('options', 'Red');
+ * formData.append('options', 'Blue');
+ * 
+ * const result = await createPoll(formData);
+ * if (!result.error) {
+ *   console.log('Poll created successfully');
+ * }
+ * ```
+ */
 export async function createPoll(formData: FormData) {
   try {
-    // CSRF protection
+    // CSRF protection - prevents cross-site request forgery attacks
+    // WHY: CSRF tokens ensure requests come from legitimate forms, not malicious sites
     const isValidCSRF = await validateCSRFToken(formData);
     if (!isValidCSRF) {
       return { error: "Invalid CSRF token. Please refresh the page and try again." };
     }
 
-    // Rate limiting
+    // Rate limiting - prevents abuse and DoS attacks
+    // WHY: Rate limiting protects against spam and ensures fair resource usage
     const clientIP = formData.get("clientIP") as string || "unknown";
     const rateLimit = checkRateLimit(`create_poll_${clientIP}`, 5, 60000); // 5 polls per minute
     
@@ -25,10 +57,12 @@ export async function createPoll(formData: FormData) {
       };
     }
 
-    // Authentication check
+    // Authentication check - ensures only logged-in users can create polls
+    // WHY: Authentication maintains accountability and prevents anonymous abuse
     const context = await requireAuth();
 
-    // Extract and validate data
+    // Extract and validate data - prevents malformed requests
+    // WHY: Form data extraction must be done carefully to prevent injection attacks
     const question = formData.get("question") as string;
     const options = formData.getAll("options").filter(Boolean) as string[];
 
@@ -36,12 +70,15 @@ export async function createPoll(formData: FormData) {
       return { error: "Please provide a question and at least two options." };
     }
 
-    // Validate and sanitize input
+    // Validate and sanitize input - ensures data integrity and prevents XSS
+    // WHY: Validation prevents database corruption; sanitization removes malicious content
     const pollData = validatePollData({ question, options });
     const sanitizedData = sanitizePollData(pollData);
 
     const supabase = await createClient();
 
+    // Database insertion with proper error handling
+    // WHY: Database operations need error handling to ensure data persistence
     const { data, error } = await supabase.from("polls").insert([
       {
         user_id: context.user!.id,
@@ -55,6 +92,8 @@ export async function createPoll(formData: FormData) {
       return { error: error.message };
     }
 
+    // Revalidate cache to show new poll immediately
+    // WHY: Cache invalidation ensures users see updated data without manual refresh
     revalidatePath("/polls");
     return { error: null, data };
   } catch (error) {
@@ -64,7 +103,27 @@ export async function createPoll(formData: FormData) {
   }
 }
 
-// GET USER POLLS
+/**
+ * Retrieves all polls created by the authenticated user
+ * 
+ * This function fetches polls with security considerations:
+ * - Requires user authentication
+ * - Only returns polls owned by the current user
+ * - Limits returned data to essential fields for security
+ * - Handles errors gracefully without exposing sensitive information
+ * 
+ * @async
+ * @function getUserPolls
+ * @returns {Promise<{polls: any[], error: string | null}>} Object containing user's polls and any error
+ * 
+ * @example
+ * ```typescript
+ * const { polls, error } = await getUserPolls();
+ * if (!error) {
+ *   polls.forEach(poll => console.log(poll.question));
+ * }
+ * ```
+ */
 export async function getUserPolls() {
   try {
     const context = await requireAuth();
@@ -139,7 +198,38 @@ export async function getPollByIdForEdit(id: string) {
   }
 }
 
-// SUBMIT VOTE
+/**
+ * Submits a vote for a poll with comprehensive security and deduplication
+ * 
+ * WHAT: Handles voting with multiple security measures including rate limiting,
+ * input validation, poll existence verification, and duplicate vote prevention
+ * for both authenticated and anonymous users.
+ * 
+ * WHY: Voting integrity is crucial for poll accuracy and user trust. Rate limiting
+ * prevents vote manipulation and DoS attacks. Input validation ensures only valid
+ * votes are recorded. Duplicate prevention maintains poll integrity by ensuring
+ * each user/IP can only vote once. The dual tracking system (user-based for
+ * authenticated users, IP-based for anonymous users) provides comprehensive
+ * protection while allowing anonymous participation. Poll existence verification
+ * prevents votes on non-existent polls, which could be used for attacks.
+ * 
+ * @async
+ * @function submitVote
+ * @param {string} pollId - The unique identifier of the poll
+ * @param {number} optionIndex - The index of the selected option (0-based)
+ * @param {string} [clientIP] - Optional client IP address for anonymous vote tracking
+ * @returns {Promise<{error: string | null}>} Result object with error status
+ * 
+ * @example
+ * ```typescript
+ * const result = await submitVote('poll-123', 1, '192.168.1.1');
+ * if (!result.error) {
+ *   console.log('Vote submitted successfully');
+ * } else {
+ *   console.error('Vote failed:', result.error);
+ * }
+ * ```
+ */
 export async function submitVote(pollId: string, optionIndex: number, clientIP?: string) {
   try {
     // Rate limiting
